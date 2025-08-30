@@ -53,11 +53,11 @@ jobs:
             echo "❌ YAML validation failed" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
-          
+
       - name: Check out repo
         if: ${{ failure() }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        
+
       - uses: ./.github/actions/slack-alert
         if: ${{ failure() }}
         with:
@@ -95,11 +95,11 @@ jobs:
           if [ $failed_count -gt 0 ]; then
             exit 1
           fi
-          
+
       - name: Check out repo
         if: ${{ failure() }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        
+
       - uses: ./.github/actions/slack-alert
         if: ${{ failure() }}
         with:

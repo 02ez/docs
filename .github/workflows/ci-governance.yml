@@ -59,11 +59,11 @@ jobs:
             echo "All workflows must have explicit top-level \`permissions:\` declarations for security." >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
-          
+
       - name: Check out repo
         if: ${{ failure() }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        
+
       - uses: ./.github/actions/slack-alert
         if: ${{ failure() }}
         with:
@@ -99,11 +99,11 @@ jobs:
             echo "Example: \`uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0\`" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
-          
+
       - name: Check out repo
         if: ${{ failure() }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        
+
       - uses: ./.github/actions/slack-alert
         if: ${{ failure() }}
         with:
@@ -129,11 +129,11 @@ jobs:
         run: |
           echo "## ActionLint Results" >> $GITHUB_STEP_SUMMARY
           echo "✅ All workflows passed actionlint validation" >> $GITHUB_STEP_SUMMARY
-          
+
       - name: Check out repo
         if: ${{ failure() }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        
+
       - uses: ./.github/actions/slack-alert
         if: ${{ failure() }}
         with:

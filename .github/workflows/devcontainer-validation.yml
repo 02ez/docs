@@ -1,0 +1,77 @@
+name: DevContainer Validation
+
+# **What it does**: Validates devcontainer JSON configuration files
+# **Why we have it**: Ensure devcontainer configs are valid and documentation examples work
+# **Who does it impact**: Contributors working with codespaces, devcontainer docs
+
+on:
+  pull_request:
+    paths:
+      - '.devcontainer/**'
+      - '**/devcontainer.json'
+      - 'content/**/codespaces/**/*.md'
+      - '.github/workflows/devcontainer-validation.yml'
+
+permissions:
+  contents: read
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  validate-devcontainer:
+    name: Validate DevContainer Config
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+        with:
+          node-version: '22'
+
+      - name: Install DevContainer CLI
+        run: npm install -g @devcontainers/cli
+
+      - name: Validate DevContainer configurations
+        run: |
+          echo "## DevContainer Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Find all devcontainer.json files
+          configs=$(find . -name "devcontainer.json" -o -name ".devcontainer.json" | grep -v node_modules)
+
+          if [[ -z "$configs" ]]; then
+            echo "ℹ️ No devcontainer.json files found" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          valid_count=0
+          total_count=0
+
+          for config in $configs; do
+            ((total_count++))
+            echo "Validating: $config"
+            
+            if devcontainer validate --workspace-folder "$(dirname "$config")"; then
+              echo "✅ **$config**: Valid" >> $GITHUB_STEP_SUMMARY
+              ((valid_count++))
+            else
+              echo "❌ **$config**: Invalid" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Summary**: $valid_count/$total_count configurations valid" >> $GITHUB_STEP_SUMMARY
+
+          if [[ $valid_count -ne $total_count ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Some devcontainer configurations are invalid**" >> $GITHUB_STEP_SUMMARY
+            echo "See logs above for specific validation errors." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
