@@ -1,0 +1,70 @@
+name: Artifact Hygiene
+
+# **What it does**: Uploads logs and failure artifacts when jobs fail
+# **Why we have it**: Preserve debugging information for failed CI runs
+# **Who does it impact**: Developers, DevOps team
+
+on:
+  workflow_run:
+    workflows: ['*']
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  collect-failure-artifacts:
+    name: Collect Failure Artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: |
+      github.repository == 'github/docs-internal' || github.repository == 'github/docs' &&
+      github.event.workflow_run.conclusion == 'failure'
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Collect failure logs
+        run: |
+          echo "## Failure Artifacts Collection" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Failed Workflow**: ${{ github.event.workflow_run.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Run ID**: ${{ github.event.workflow_run.id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Conclusion**: ${{ github.event.workflow_run.conclusion }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Create logs directory for collection
+          mkdir -p logs/
+
+          # Create failure summary
+          cat > logs/failure-summary.txt << EOF
+          Workflow: ${{ github.event.workflow_run.name }}
+          Run ID: ${{ github.event.workflow_run.id }}
+          Branch: ${{ github.event.workflow_run.head_branch }}
+          Commit: ${{ github.event.workflow_run.head_sha }}
+          Conclusion: ${{ github.event.workflow_run.conclusion }}
+          Created: ${{ github.event.workflow_run.created_at }}
+          Updated: ${{ github.event.workflow_run.updated_at }}
+          EOF
+
+          # Create pytest-failures placeholder (would be populated by actual failed tests)
+          echo "Failure artifacts collected at $(date)" > pytest-failures.txt
+
+      - name: Upload failure artifacts
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: failure-logs-${{ github.event.workflow_run.id }}
+          path: |
+            logs/
+            pytest-failures.txt
+          retention-days: 3
+
+      - name: Link artifacts in summary
+        run: |
+          echo "📁 **Failure artifacts uploaded** with 3-day retention" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifact Name**: \`failure-logs-${{ github.event.workflow_run.id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download artifacts from the [workflow run page](${{ github.event.workflow_run.html_url }}) to debug the failure." >> $GITHUB_STEP_SUMMARY

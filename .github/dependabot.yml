@@ -13,24 +13,34 @@ updates:
     schedule:
       interval: weekly
       day: tuesday
+    groups:
+      minor-patches:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 5
     ignore:
       # Because this is so dependent on the remote server we use
       - dependency-name: '@elastic/elasticsearch'
       # Because whatever we have needs to match what @primer/react also uses
       - dependency-name: 'styled-components'
-      - dependency-name: '*'
-        update-types:
-          ['version-update:semver-patch', 'version-update:semver-minor']
 
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
       interval: weekly
       day: tuesday
-    ignore:
-      - dependency-name: '*'
+    groups:
+      minor-patches:
+        patterns:
+          - '*'
         update-types:
-          ['version-update:semver-patch', 'version-update:semver-minor']
+          - minor
+          - patch
+    open-pull-requests-limit: 5
+    ignore:
       - dependency-name: 'github/internal-actions'
 
   - package-ecosystem: 'docker'

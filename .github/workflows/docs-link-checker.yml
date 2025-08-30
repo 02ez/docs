@@ -1,0 +1,82 @@
+name: Docs Link Checker
+
+# **What it does**: Checks for broken links in documentation on docs-only changes
+# **Why we have it**: Prevent broken links from being merged into documentation
+# **Who does it impact**: Documentation contributors, content team
+
+on:
+  pull_request:
+    paths:
+      - 'content/**/*.md'
+      - 'data/**/*.yml'
+      - '.github/workflows/docs-link-checker.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  link-checker:
+    name: Check Documentation Links
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Get changed files
+        uses: ./.github/actions/get-changed-files
+        with:
+          head: ${{ github.event.pull_request.head.ref }}
+          output_file: changed_files.txt
+
+      - name: Filter docs files only
+        run: |
+          # Only check changed documentation files
+          grep -E '^content/.*\.md$' changed_files.txt > docs_files.txt || touch docs_files.txt
+
+      - name: Run link checker on changed docs
+        if: hashFiles('docs_files.txt') != ''
+        uses: lycheeverse/lychee-action@7cd0af4c74a61395d6b204815a38e50348dd2c67 # v2.1.0
+        with:
+          args: --verbose --no-progress --accept 429 --timeout 30 --retry-wait-time 15 --max-redirects 10
+          input: docs_files.txt
+          format: markdown
+          output: lychee-results.md
+          fail: false # We'll handle failure ourselves for better reporting
+
+      - name: Process link check results
+        if: always()
+        run: |
+          echo "## Link Checker Results" >> $GITHUB_STEP_SUMMARY
+
+          if [[ -f "lychee-results.md" ]]; then
+            broken_links=$(grep -c "❌" lychee-results.md || echo "0")
+            total_links=$(grep -c -E "(✅|❌)" lychee-results.md || echo "0")
+            
+            echo "- **Total links checked**: $total_links" >> $GITHUB_STEP_SUMMARY
+            echo "- **Broken links**: $broken_links" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            if [[ "$broken_links" -gt 0 ]]; then
+              echo "### ❌ Broken Links Found" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              
+              # Show broken links table (first 20 entries)
+              grep "❌" lychee-results.md | head -20 >> $GITHUB_STEP_SUMMARY || true
+              
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Please fix the broken links before merging." >> $GITHUB_STEP_SUMMARY
+              exit 1
+            else
+              echo "✅ **All documentation links are working**" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "✅ **No documentation files changed or link check completed**" >> $GITHUB_STEP_SUMMARY
+          fi

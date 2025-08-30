@@ -12,10 +12,16 @@ on:
 permissions:
   contents: read
 
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.ref }}'
+  cancel-in-progress: true
+
 jobs:
   check_github_github_links:
     if: github.repository == 'github/docs-internal'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       # need to use a token from a user with access to github/github for this step
       GITHUB_TOKEN: ${{ secrets.DOCS_BOT_PAT_BASE }}

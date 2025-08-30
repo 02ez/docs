@@ -3,6 +3,12 @@
 # https://docs.github.com/articles/about-codeowners
 # https://git-scm.com/docs/gitignore
 
+# Security team owns workflow and security configurations
+/.github/** @github/security
+
+# Documentation team owns content
+/content/** @github/docs-content
+
 # Site Policy
 /content/site-policy/ @github/site-policy-admins
 
