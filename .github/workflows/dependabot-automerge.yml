@@ -1,0 +1,97 @@
+name: Dependabot Automerge
+
+# **What it does**: Automatically merges Dependabot patch/minor updates after checks pass
+# **Why we have it**: Reduce manual overhead for safe dependency updates
+# **Who does it impact**: Maintainers, dependency management
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - labeled
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  automerge:
+    name: Dependabot Automerge
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: |
+      github.repository == 'github/docs-internal' || github.repository == 'github/docs' &&
+      (github.actor == 'dependabot[bot]' || contains(github.event.pull_request.labels.*.name, 'automerge'))
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Analyze Dependabot PR
+        id: analyze
+        if: github.actor == 'dependabot[bot]'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get PR details
+          pr_title="${{ github.event.pull_request.title }}"
+
+          # Determine update type
+          if echo "$pr_title" | grep -q "bump.*from.*to"; then
+            # Extract version info if possible
+            if echo "$pr_title" | grep -qE "(patch|minor)"; then
+              update_type="patch_minor"
+            elif echo "$pr_title" | grep -qE "major"; then
+              update_type="major"
+            else
+              # Default analysis based on title pattern
+              if echo "$pr_title" | grep -qE "from [0-9]+\.[0-9]+\.[0-9]+ to [0-9]+\.[0-9]+\.[0-9]+"; then
+                update_type="patch_minor"
+              else
+                update_type="major"
+              fi
+            fi
+          else
+            update_type="unknown"
+          fi
+
+          echo "update_type=$update_type" >> $GITHUB_OUTPUT
+          echo "## Dependabot Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "- **Update Type**: $update_type" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR Title**: $pr_title" >> $GITHUB_STEP_SUMMARY
+
+      - name: Enable automerge for safe updates
+        if: |
+          (github.actor == 'dependabot[bot]' && steps.analyze.outputs.update_type == 'patch_minor') ||
+          contains(github.event.pull_request.labels.*.name, 'automerge')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Enable automerge
+          gh pr merge ${{ github.event.pull_request.number }} --auto --squash
+
+          echo "✅ **Automerge enabled** for this PR" >> $GITHUB_STEP_SUMMARY
+          echo "PR will be automatically merged when all required checks pass." >> $GITHUB_STEP_SUMMARY
+
+      - name: Block major updates
+        if: github.actor == 'dependabot[bot]' && steps.analyze.outputs.update_type == 'major'
+        run: |
+          echo "⚠️ **Major update detected** - manual review required" >> $GITHUB_STEP_SUMMARY
+          echo "Major version updates require manual approval before merging." >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment status update
+        if: always()
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            🤖 **Automerge Status Update**
+
+            ${{ (github.actor == 'dependabot[bot]' && steps.analyze.outputs.update_type == 'patch_minor') && '✅ This patch/minor update will be automatically merged when all checks pass.' || '' }}
+            ${{ (github.actor == 'dependabot[bot]' && steps.analyze.outputs.update_type == 'major') && '⚠️ This major update requires manual review before merging.' || '' }}
+            ${{ contains(github.event.pull_request.labels.*.name, 'automerge') && '✅ Manual automerge enabled - will merge when all checks pass.' || '' }}

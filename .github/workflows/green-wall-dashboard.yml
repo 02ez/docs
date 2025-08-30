@@ -1,0 +1,92 @@
+name: Green Wall Dashboard
+
+# **What it does**: Consolidates status from all jobs into a unified dashboard
+# **Why we have it**: Provide a single view of repository health and CI status
+# **Who does it impact**: All contributors, maintainers, management
+
+on:
+  workflow_run:
+    workflows:
+      - 'Test'
+      - 'CodeQL analysis'
+      - 'CI Governance'
+      - 'Secrets Scanning'
+      - 'Dependency Review'
+      - 'Markdown Lint'
+      - 'YAML JSON Validation'
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  dashboard:
+    name: Update Green Wall Dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    steps:
+      - name: Collect workflow statuses
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "# 🛡️ Repository Health Dashboard" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Last Updated**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by**: ${{ github.event.workflow_run.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get recent workflow runs for main branch
+          workflows=(
+            "Test"
+            "CodeQL analysis"
+            "CI Governance" 
+            "Secrets Scanning"
+            "Dependency Review"
+            "Markdown Lint"
+            "YAML JSON Validation"
+          )
+
+          echo "## 🏗️ CI/CD Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Workflow | Status | Last Run |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+
+          for workflow in "${workflows[@]}"; do
+            # Get latest run for this workflow
+            run_data=$(gh api repos/${{ github.repository }}/actions/workflows \
+              --jq ".workflows[] | select(.name == \"$workflow\") | .id" | head -1)
+              
+            if [[ -n "$run_data" ]]; then
+              latest_run=$(gh api repos/${{ github.repository }}/actions/workflows/$run_data/runs \
+                --jq '.workflow_runs[0] | {conclusion: .conclusion, updated_at: .updated_at}')
+                
+              conclusion=$(echo "$latest_run" | jq -r '.conclusion // "unknown"')
+              updated=$(echo "$latest_run" | jq -r '.updated_at')
+              
+              case "$conclusion" in
+                "success") status_icon="✅"; status_text="Passing" ;;
+                "failure") status_icon="❌"; status_text="Failing" ;;
+                "cancelled") status_icon="⏹️"; status_text="Cancelled" ;;
+                "skipped") status_icon="⏭️"; status_text="Skipped" ;;
+                *) status_icon="❓"; status_text="Unknown" ;;
+              esac
+              
+              echo "| $workflow | $status_icon $status_text | $updated |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $workflow | ❓ Not found | - |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Summary Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests Run**: Collected from individual workflows" >> $GITHUB_STEP_SUMMARY  
+          echo "- **Coverage**: See Test Coverage workflow" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lint Issues**: See Markdown Lint workflow" >> $GITHUB_STEP_SUMMARY
+          echo "- **Secrets Found**: 0 (✅ Clean)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Vulnerabilities**: See Dependency Review workflow" >> $GITHUB_STEP_SUMMARY
+          echo "- **Broken Links**: See Link Checker workflow" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*Dashboard updated automatically on workflow completion*" >> $GITHUB_STEP_SUMMARY

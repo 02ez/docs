@@ -1,0 +1,107 @@
+name: YAML JSON Validation
+
+# **What it does**: Validates YAML and JSON files for syntax errors
+# **Why we have it**: Prevent broken configuration files from being merged
+# **Who does it impact**: All contributors, DevOps team
+
+on:
+  pull_request:
+    paths:
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '**/*.json'
+      - '.github/workflows/yaml-json-validation.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '**/*.json'
+
+permissions:
+  contents: read
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  yaml-validation:
+    name: Validate YAML files
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install yamllint
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yamllint
+
+      - name: Validate YAML files
+        run: |
+          echo "## YAML Validation Results" >> $GITHUB_STEP_SUMMARY
+          yaml_files=$(find . -name "*.yml" -o -name "*.yaml" | grep -v node_modules | wc -l)
+
+          if yamllint -f github .; then
+            echo "✅ All $yaml_files YAML files are valid" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ YAML validation failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+      - name: Check out repo
+        if: ${{ failure() }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        
+      - uses: ./.github/actions/slack-alert
+        if: ${{ failure() }}
+        with:
+          slack_channel_id: ${{ secrets.DOCS_ALERTS_SLACK_CHANNEL_ID }}
+          slack_token: ${{ secrets.SLACK_DOCS_BOT_TOKEN }}
+
+  json-validation:
+    name: Validate JSON files
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Validate JSON files
+        run: |
+          echo "## JSON Validation Results" >> $GITHUB_STEP_SUMMARY
+          json_count=0
+          failed_count=0
+
+          while IFS= read -r -d '' file; do
+            ((json_count++))
+            if ! jq -e . "$file" >/dev/null 2>&1; then
+              echo "❌ Invalid JSON: $file" >> $GITHUB_STEP_SUMMARY
+              ((failed_count++))
+            fi
+          done < <(find . -name "*.json" -not -path "./node_modules/*" -not -path "./.next/*" -print0)
+
+          valid_count=$((json_count - failed_count))
+          echo "- **Total JSON files**: $json_count" >> $GITHUB_STEP_SUMMARY
+          echo "- **Valid**: $valid_count" >> $GITHUB_STEP_SUMMARY
+          echo "- **Invalid**: $failed_count" >> $GITHUB_STEP_SUMMARY
+
+          if [ $failed_count -gt 0 ]; then
+            exit 1
+          fi
+          
+      - name: Check out repo
+        if: ${{ failure() }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        
+      - uses: ./.github/actions/slack-alert
+        if: ${{ failure() }}
+        with:
+          slack_channel_id: ${{ secrets.DOCS_ALERTS_SLACK_CHANNEL_ID }}
+          slack_token: ${{ secrets.SLACK_DOCS_BOT_TOKEN }}

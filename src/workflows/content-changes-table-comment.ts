@@ -9,6 +9,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { execSync } from 'node:child_process'
 
 import * as github from '@actions/github'
 import core from '@actions/core'
@@ -61,25 +62,129 @@ async function main(owner: string, repo: string, baseSHA: string, headSHA: strin
     auth: `token ${GITHUB_TOKEN}`,
   })
 
-  // get the list of file changes from the PR
-  // this works even if the head commit is from a fork
-  const response = await octokit.rest.repos.compareCommitsWithBasehead({
-    owner,
-    repo,
-    basehead: `${baseSHA}...${headSHA}`,
-  })
+  // Use git diff to get the list of file changes with status
+  let filesWithStatus: Array<{
+    filename: string
+    status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged'
+  }> = []
+  let changedFiles: string[] = []
 
-  const { files } = response.data
+  try {
+    // Try to fetch base ref if not available
+    try {
+      execSync(`git rev-parse --verify origin/${process.env.GITHUB_BASE_REF || 'main'}`, {
+        stdio: 'ignore',
+      })
+    } catch {
+      if (process.env.GITHUB_BASE_REF) {
+        execSync(`git fetch origin ${process.env.GITHUB_BASE_REF} --depth=1`, { stdio: 'inherit' })
+      }
+    }
+
+    const baseRef = process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : baseSHA
+    const headRef = process.env.GITHUB_SHA || headSHA
+
+    // Get file changes with status information
+    const gitDiffWithStatus = execSync(
+      `git diff --name-status --diff-filter=ACMRT ${baseRef}...${headRef}`,
+      { encoding: 'utf8', cwd: process.cwd() },
+    ).trim()
+
+    filesWithStatus = gitDiffWithStatus
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [status, filename] = line.split('\t')
+        let fileStatus:
+          | 'added'
+          | 'removed'
+          | 'modified'
+          | 'renamed'
+          | 'copied'
+          | 'changed'
+          | 'unchanged'
+        switch (status.charAt(0)) {
+          case 'A':
+            fileStatus = 'added'
+            break
+          case 'D':
+            fileStatus = 'removed'
+            break
+          case 'M':
+            fileStatus = 'modified'
+            break
+          case 'R':
+            fileStatus = 'renamed'
+            break
+          case 'C':
+            fileStatus = 'copied'
+            break
+          default:
+            fileStatus = 'changed'
+            break
+        }
+        return { filename, status: fileStatus }
+      })
+
+    changedFiles = filesWithStatus.map((f) => f.filename)
+  } catch (error) {
+    // Fallback to GitHub API if git diff fails
+    console.warn('Git diff failed, falling back to GitHub API:', error)
+    const response = await octokit.rest.repos.compareCommitsWithBasehead({
+      owner,
+      repo,
+      basehead: `${baseSHA}...${headSHA}`,
+    })
+
+    filesWithStatus = (response.data.files || []).map((f) => ({
+      filename: f.filename,
+      status: f.status as
+        | 'added'
+        | 'removed'
+        | 'modified'
+        | 'renamed'
+        | 'copied'
+        | 'changed'
+        | 'unchanged',
+    }))
+    changedFiles = filesWithStatus.map((f) => f.filename)
+  }
+
+  // Count docs files using grep pattern
+  const docsFiles = changedFiles.filter(
+    (filename) => /^content\/.*\.md$/.test(filename) && filename.toLowerCase() !== 'readme.md',
+  )
+
+  // Write totals to GitHub Step Summary
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const summary = `## Content Changes Summary\n\n- **Total files changed**: ${changedFiles.length}\n- **Documentation files**: ${docsFiles.length}\n- **Non-doc files**: ${changedFiles.length - docsFiles.length}\n`
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary)
+  }
 
   const pathPrefix = 'content/'
   const reusablesPrefix = 'data/reusables/'
-  const articleFiles = (files || []).filter(
-    ({ filename }) => filename.startsWith(pathPrefix) && filename.toLowerCase() !== 'readme.md',
-  )
-  const reusablesFiles = (files || []).filter(
-    ({ filename }) =>
-      filename.startsWith(reusablesPrefix) && filename.toLowerCase() !== 'readme.md',
-  )
+
+  // Create file objects that match the existing interface
+  const articleFiles = filesWithStatus
+    .filter(
+      ({ filename }) => filename.startsWith(pathPrefix) && filename.toLowerCase() !== 'readme.md',
+    )
+    .map(({ filename, status }) => ({
+      filename,
+      blob_url: makeBlobUrl(owner, repo, headSHA, filename),
+      status,
+    }))
+
+  const reusablesFiles = filesWithStatus
+    .filter(
+      ({ filename }) =>
+        filename.startsWith(reusablesPrefix) && filename.toLowerCase() !== 'readme.md',
+    )
+    .map(({ filename, status }) => ({
+      filename,
+      blob_url: makeBlobUrl(owner, repo, headSHA, filename),
+      status,
+    }))
 
   const filesUsingReusables: File[] = []
   if (reusablesFiles.length) {
@@ -102,7 +207,7 @@ async function main(owner: string, repo: string, baseSHA: string, headSHA: strin
       filesUsingReusables.push({
         filename: contentFilePath,
         blob_url: makeBlobUrl(owner, repo, headSHA, contentFilePath),
-        status: 'changed',
+        status: 'changed' as const,
       })
     }
   }

@@ -1,0 +1,71 @@
+name: Welcome First-Time Contributors
+
+# **What it does**: Welcomes first-time contributors with helpful links and information
+# **Why we have it**: Help new contributors understand how to contribute effectively
+# **Who does it impact**: First-time contributors, community
+
+on:
+  pull_request_target:
+    types:
+      - opened
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  welcome:
+    name: Welcome First-Time Contributors
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    steps:
+      - name: Check if first-time contributor
+        id: check-contributor
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if this is the user's first contribution to this repo
+          author="${{ github.event.pull_request.user.login }}"
+
+          # Count previous PRs from this user
+          prev_prs=$(gh api repos/${{ github.repository }}/pulls \
+            --jq ".[] | select(.user.login == \"$author\") | .number" | wc -l)
+            
+          if [[ $prev_prs -eq 1 ]]; then
+            echo "first_time=true" >> $GITHUB_OUTPUT
+          else
+            echo "first_time=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Welcome first-time contributor
+        if: steps.check-contributor.outputs.first_time == 'true'
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ## 👋 Welcome to GitHub Docs!
+
+            Thank you for your first contribution to our documentation! We're excited to have you as part of our community.
+
+            ### Getting Started
+            Before we can review your changes, please take a moment to familiarize yourself with our guidelines:
+
+            - 📖 **[Contributing Guide](https://docs.github.com/en/contributing)** - Learn about our contribution process
+            - 📋 **[Code of Conduct](https://docs.github.com/en/contributing/writing-for-github-docs/about-githubs-documentation-fundamentals)** - Our community standards
+            - 🔒 **[Security Policy](https://docs.github.com/en/contributing/writing-for-github-docs/about-githubs-documentation-fundamentals)** - How we handle security issues
+
+            ### What Happens Next?
+            - Our team will review your PR and provide feedback
+            - Please make sure all CI checks are passing (green checkmarks)
+            - Feel free to ask questions if you need help!
+
+            Thanks again for contributing! 🎉
+
+            ---
+            🤖 *This is an automated welcome message for first-time contributors*

@@ -1,0 +1,100 @@
+name: Dataset Schema Check
+
+# **What it does**: Validates OpenML dataset schema and structure
+# **Why we have it**: Ensure data consistency and validate external dataset dependencies
+# **Who does it impact**: Data science team, researchers
+
+on:
+  schedule:
+    - cron: '20 16 * * *' # Daily at 16:20 UTC / 8:20 PST
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tests/test_openml_schema.py'
+      - '.github/workflows/dataset-schema-check.yml'
+
+permissions:
+  contents: read
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  schema-validation:
+    name: Validate Dataset Schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Python
+        uses: actions/setup-python@0ae2962b01b4e1c7e3da37ad50dc1ff9bb0c4f4e # v5.3.0
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas pyarrow requests
+
+      - name: Create schema test
+        run: |
+          mkdir -p tests
+          cat > tests/test_openml_schema.py << 'EOF'
+          import pandas as pd
+          import requests
+          from io import BytesIO
+
+          def test_openml_dataset():
+              """Test OpenML dataset schema and structure"""
+              url = "https://data.openml.org/datasets/0004/46500/dataset_46500.pq"
+              
+              # Download dataset
+              response = requests.get(url, timeout=30)
+              response.raise_for_status()
+              
+              # Read parquet data
+              df = pd.read_parquet(BytesIO(response.content))
+              
+              # Validate schema
+              assert df.shape[0] == 2069, f"Expected 2069 rows, got {df.shape[0]}"
+              assert df.shape[1] == 9, f"Expected 9 columns, got {df.shape[1]}"
+              
+              # Check for nulls
+              null_count = df.isnull().sum().sum()
+              assert null_count == 0, f"Found {null_count} null values in dataset"
+              
+              print(f"✅ Dataset validation passed: {df.shape[0]} rows, {df.shape[1]} columns, {null_count} nulls")
+              return True
+              
+          if __name__ == "__main__":
+              test_openml_dataset()
+              print("Schema validation completed successfully")
+          EOF
+
+      - name: Run schema validation
+        run: |
+          echo "## Dataset Schema Validation" >> $GITHUB_STEP_SUMMARY
+
+          if python tests/test_openml_schema.py; then
+            echo "✅ **OpenML dataset schema validation passed**" >> $GITHUB_STEP_SUMMARY
+            echo "- Dataset contains expected 2069 rows and 9 columns" >> $GITHUB_STEP_SUMMARY
+            echo "- No null values detected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Dataset schema validation failed**" >> $GITHUB_STEP_SUMMARY
+            echo "See job logs for details" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+      - name: Check out repo
+        if: ${{ failure() }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        
+      - uses: ./.github/actions/slack-alert
+        if: ${{ failure() }}
+        with:
+          slack_channel_id: ${{ secrets.DOCS_ALERTS_SLACK_CHANNEL_ID }}
+          slack_token: ${{ secrets.SLACK_DOCS_BOT_TOKEN }}

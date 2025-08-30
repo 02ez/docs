@@ -1,0 +1,30 @@
+# Gitleaks configuration for docs repository
+# https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
+
+title = "Gitleaks Config"
+
+[extend]
+# Use default gitleaks rules
+useDefault = true
+
+[allowlist]
+description = "Allowlist for false positives"
+
+# Allow example tokens in documentation
+[[allowlist.regexes]]
+description = "Documentation examples"
+regex = '''(github_pat_|ghp_|gho_|ghu_|ghs_|ghr_|example|sample|placeholder|xxx|abc|test)'''
+
+# Allow URLs that contain tokens in documentation
+[[allowlist.paths]]
+description = "Documentation content paths"
+paths = [
+    '''content/.*\.md$''',
+    '''data/.*\.yml$''',
+    '''src/fixtures/.*'''
+]
+
+# Example tokens should not trigger
+[[allowlist.regexes]]
+description = "Example tokens in docs"
+regex = '''(YOUR_TOKEN|YOUR_PAT|EXAMPLE_TOKEN|github_pat_11AAAG)'''

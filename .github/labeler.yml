@@ -1,0 +1,31 @@
+# Configuration for auto-labeling PRs
+# https://github.com/actions/labeler
+
+# Workflow and CI related changes
+area:workflows:
+  - changed-files:
+      - any-glob-to-any-file: '.github/workflows/**'
+      - any-glob-to-any-file: '.github/actions/**'
+
+# Documentation changes
+area:docs:
+  - changed-files:
+      - any-glob-to-any-file: 'content/**'
+      - any-glob-to-any-file: '**/*.md'
+      - any-glob-to-any-file: 'data/**'
+
+# Source code changes
+area:engineering:
+  - changed-files:
+      - any-glob-to-any-file: 'src/**/*.{ts,tsx,js,mjs}'
+      - any-glob-to-any-file: '*.{ts,js,json}'
+      - any-glob-to-any-file: 'package*.json'
+
+# Security related files
+area:security:
+  - changed-files:
+      - any-glob-to-any-file: '.github/workflows/codeql.yml'
+      - any-glob-to-any-file: '.github/workflows/secrets.yml'
+      - any-glob-to-any-file: '.github/workflows/ci-governance.yml'
+      - any-glob-to-any-file: '.gitleaks.toml'
+      - any-glob-to-any-file: 'CODEOWNERS'

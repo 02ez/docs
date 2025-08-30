@@ -1,0 +1,98 @@
+name: Workflow Safety Check
+
+# **What it does**: Scans workflows for dangerous patterns like pull_request_target
+# **Why we have it**: Prevent security vulnerabilities in workflow configurations
+# **Who does it impact**: Security team, workflow authors
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  scan-workflow-safety:
+    name: Scan Workflow Safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Scan for dangerous patterns
+        run: |
+          echo "## Workflow Safety Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Define allowlist for pull_request_target usage
+          allowed_files=(
+            ".github/workflows/review-comment.yml"
+            ".github/workflows/triage-pull-requests.yml"
+          )
+
+          risky_patterns=0
+
+          # Scan for pull_request_target usage
+          while IFS= read -r -d '' file; do
+            if grep -q "pull_request_target" "$file"; then
+              # Check if file is in allowlist
+              allowed=false
+              for allowed_file in "${allowed_files[@]}"; do
+                if [[ "$file" == "./$allowed_file" ]]; then
+                  allowed=true
+                  break
+                fi
+              done
+              
+              if [[ "$allowed" == "false" ]]; then
+                echo "⚠️ **Risky pattern found**: $file uses \`pull_request_target\`" >> $GITHUB_STEP_SUMMARY
+                ((risky_patterns++))
+              else
+                echo "✅ **Allowlisted**: $file uses \`pull_request_target\` (approved)" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          done < <(find .github/workflows -name "*.yml" -o -name "*.yaml" -print0)
+
+          # Check for other risky patterns
+          if grep -r "secrets\." .github/workflows/ | grep -v "secrets.GITHUB_TOKEN"; then
+            echo "⚠️ **Risky pattern**: Custom secrets usage in workflows" >> $GITHUB_STEP_SUMMARY
+            ((risky_patterns++))
+          fi
+
+          if [[ $risky_patterns -gt 0 ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Security Review Required" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Workflows with \`pull_request_target\` can execute arbitrary code from forks." >> $GITHUB_STEP_SUMMARY
+            echo "Ensure proper input validation and minimal permissions are used." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Total risky patterns found**: $risky_patterns" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ **No risky workflow patterns detected**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+      - name: Check out repo
+        if: ${{ failure() }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        
+      - uses: ./.github/actions/slack-alert
+        if: ${{ failure() }}
+        with:
+          slack_channel_id: ${{ secrets.DOCS_ALERTS_SLACK_CHANNEL_ID }}
+          slack_token: ${{ secrets.SLACK_DOCS_BOT_TOKEN }}

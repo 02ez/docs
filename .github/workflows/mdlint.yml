@@ -1,0 +1,76 @@
+name: Markdown Lint
+
+# **What it does**: Lints Markdown files for style and formatting issues
+# **Why we have it**: Maintain consistent documentation formatting and style
+# **Who does it impact**: Documentation contributors, content team
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+      - '.github/workflows/mdlint.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.md'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  markdownlint:
+    name: Lint Markdown
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli
+
+      - name: Run markdownlint
+        id: markdown-lint
+        run: |
+          echo "## Markdown Lint Results" >> $GITHUB_STEP_SUMMARY
+
+          # Run markdownlint and capture output
+          if markdownlint '**/*.md' --json > lint-results.json 2>&1; then
+            echo "✅ All Markdown files passed linting" >> $GITHUB_STEP_SUMMARY
+          else
+            # Parse first 20 issues for summary
+            echo "❌ Markdown linting issues found:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            if [[ -f "lint-results.json" ]]; then
+              jq -r '.[] | "- **\(.fileName)**: \(.lineNumber) - \(.ruleDescription)"' lint-results.json 2>/dev/null | head -20 >> $GITHUB_STEP_SUMMARY || true
+            fi
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "See workflow logs for complete results." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+      - name: Check out repo
+        if: ${{ failure() }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        
+      - uses: ./.github/actions/slack-alert
+        if: ${{ failure() }}
+        with:
+          slack_channel_id: ${{ secrets.DOCS_ALERTS_SLACK_CHANNEL_ID }}
+          slack_token: ${{ secrets.SLACK_DOCS_BOT_TOKEN }}

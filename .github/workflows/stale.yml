@@ -1,36 +1,72 @@
-name: Stale check for stalled pull requests in the docs-internal repository
+name: Stale Issues and PRs
 
-# **What it does**: Identifies pull requests that have been inactive for 30 days.
-# **Why we have it**: We want to avoid pull requests that are stalled and not being reviewed.
-# **Who does it impact**: Everyone that works in the internal repository.
+# **What it does**: Manages stale issues and pull requests
+# **Why we have it**: Keep the repository clean and actionable by managing inactive items
+# **Who does it impact**: Issue triagers, contributors, CODEOWNERS
 
 on:
   schedule:
     - cron: '20 16 * * 1' # Run each Monday at 16:20 UTC / 8:20 PST
-  push:
-    paths:
-      - .github/workflows/stale.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
   pull-requests: write
   issues: write
 
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.ref }}'
+  cancel-in-progress: true
+
 jobs:
   stale:
-    if: github.repository == 'github/docs-internal'
+    name: Mark Stale Items
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/stale@28ca1036281a5e5922ead5184a1bbf96e5fc984e # v9.0.0
+      - name: Stale Issues and PRs
+        uses: actions/stale@28ca1036281a5e5922ead5184a1bbf96e5fc984e # v9.1.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          stale-pr-message: "It looks as if this pull request has been inactive for 30 days. We want to check in with you to see if you plan to continue working on it. If you do, please add a comment to let us know. If we don't hear from you, we will close this pull request after 14 days."
-          days-before-stale: 30
-          days-before-close: 14
-          stale-pr-label: 'stale'
-          exempt-pr-labels: 'never-stale'
-          close-pr-label: 'Closed as inactive'
 
+          # 7 day stale marking
+          days-before-stale: 7
+          stale-issue-label: 'stale-7d'
+          stale-pr-label: 'stale-7d'
+
+          # Ping CODEOWNERS for awareness
+          stale-issue-message: |
+            This issue has been automatically marked as stale because it has not had recent activity in the last 7 days.
+            It will be closed if no further activity occurs within 7 more days.
+
+            /cc @github/docs-content @github/security
+
+          stale-pr-message: |
+            This pull request has been automatically marked as stale because it has not had recent activity in the last 7 days.
+            It will be closed if no further activity occurs within 7 more days.
+
+            /cc @github/docs-content @github/security
+
+          # Optional close after 14 days total
+          days-before-close: 14
+          close-issue-message: |
+            This issue was closed because it has been stalled for 14 days with no activity.
+            Please feel free to reopen if you'd like to continue working on this.
+
+          close-pr-message: |
+            This pull request was closed because it has been stalled for 14 days with no activity. 
+            Please feel free to reopen if you'd like to continue working on this.
+
+          # Exemptions
+          exempt-issue-labels: 'security,never-stale,pinned'
+          exempt-pr-labels: 'security,never-stale,pinned'
+
+          # Remove label on activity
+          remove-stale-when-updated: true
+
+          # Performance
           operations-per-run: 150
 
       - name: Print outputs
@@ -39,6 +75,7 @@ jobs:
       - name: Check out repo
         if: ${{ failure() }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
       - uses: ./.github/actions/slack-alert
         if: ${{ failure() }}
         with:
