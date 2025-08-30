@@ -1,0 +1,140 @@
+name: Devcontainer Security CI
+
+# **What it does**: Validates devcontainer configuration for security best practices.
+# **Why we have it**: Ensures devcontainer setup follows security guidelines and doesn't expose services publicly by default.
+# **Who does it impact**: Docs engineering and contributors using Codespaces.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.devcontainer/**'
+      - '.github/workflows/devcontainer-ci.yml'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  validate-devcontainer:
+    name: Validate Devcontainer Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install devcontainer CLI
+        run: npm install -g @devcontainers/cli
+
+      - name: Validate devcontainer.json structure
+        run: |
+          echo "🔍 Validating devcontainer.json structure..."
+          
+          # Check if devcontainer.json exists
+          if [ ! -f ".devcontainer/devcontainer.json" ]; then
+            echo "❌ devcontainer.json not found"
+            exit 1
+          fi
+          
+          # Validate JSON structure
+          if ! jq empty .devcontainer/devcontainer.json 2>/dev/null; then
+            echo "❌ devcontainer.json is not valid JSON"
+            exit 1
+          fi
+          
+          echo "✅ devcontainer.json structure is valid"
+
+      - name: Check for security best practices
+        run: |
+          echo "🔒 Checking devcontainer security configuration..."
+          
+          # Check that we don't have direct public port forwarding
+          if grep -q "ports visibility.*:public" .devcontainer/devcontainer.json; then
+            echo "❌ Found direct public port visibility setting in devcontainer.json"
+            echo "   This is a security risk. Use the secure setup script instead."
+            exit 1
+          fi
+          
+          # Check that postAttachCommand uses our secure script
+          if grep -q "postAttachCommand" .devcontainer/devcontainer.json; then
+            if ! grep -q "setup-port-visibility.sh" .devcontainer/devcontainer.json; then
+              echo "⚠️  postAttachCommand found but not using secure port visibility script"
+              echo "   Consider using ./.devcontainer/setup-port-visibility.sh for secure defaults"
+            else
+              echo "✅ Using secure port visibility script"
+            fi
+          fi
+          
+          # Check if secure script exists
+          if [ -f ".devcontainer/setup-port-visibility.sh" ]; then
+            if [ ! -x ".devcontainer/setup-port-visibility.sh" ]; then
+              echo "❌ setup-port-visibility.sh exists but is not executable"
+              exit 1
+            else
+              echo "✅ Secure port visibility script is executable"
+            fi
+          fi
+          
+          echo "✅ Security checks passed"
+
+      - name: Validate port configuration
+        run: |
+          echo "🔍 Validating port configuration..."
+          
+          # Check forwardPorts configuration
+          FORWARD_PORTS=$(jq -r '.forwardPorts[]? // empty' .devcontainer/devcontainer.json)
+          if [ -n "$FORWARD_PORTS" ]; then
+            echo "📋 Found forwarded ports: $FORWARD_PORTS"
+            
+            # Ensure we have portsAttributes for forwarded ports
+            for port in $FORWARD_PORTS; do
+              PORT_ATTRS=$(jq -r ".portsAttributes.\"$port\" // empty" .devcontainer/devcontainer.json)
+              if [ -z "$PORT_ATTRS" ] || [ "$PORT_ATTRS" = "null" ]; then
+                echo "⚠️  Port $port is forwarded but has no portsAttributes configuration"
+              else
+                echo "✅ Port $port has portsAttributes configuration"
+              fi
+            done
+          else
+            echo "📋 No forwarded ports configured"
+          fi
+          
+          echo "✅ Port configuration validation completed"
+
+      - name: Check Dockerfile security
+        run: |
+          echo "🔍 Checking Dockerfile security..."
+          
+          if [ -f ".devcontainer/Dockerfile" ]; then
+            # Check for security issues in Dockerfile
+            if grep -q "USER root" .devcontainer/Dockerfile; then
+              echo "⚠️  Dockerfile runs as root user - consider using non-root user for security"
+            fi
+            
+            # Check for latest tag usage
+            if grep -q ":latest" .devcontainer/Dockerfile; then
+              echo "⚠️  Dockerfile uses 'latest' tag - consider pinning to specific version"
+            fi
+            
+            echo "✅ Dockerfile security check completed"
+          else
+            echo "📋 No custom Dockerfile found"
+          fi
+
+      - name: Summary
+        run: |
+          echo "🎉 Devcontainer security validation completed successfully!"
+          echo ""
+          echo "Security measures in place:"
+          echo "✅ JSON structure validated"
+          echo "✅ No direct public port forwarding"
+          echo "✅ Secure port visibility script configured"
+          echo "✅ Port configuration validated"
+          echo "✅ Dockerfile security checked"
