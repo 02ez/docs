@@ -31,44 +31,55 @@ jobs:
       - name: Write step summary
         run: |
           set -e
-          
+
           echo "## PR File Changes Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          
+
           # Fetch the base if missing, with error handling
           if ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
             echo "⚠️ Base commit not found locally, fetching..." >> $GITHUB_STEP_SUMMARY
             if ! git fetch origin "$BASE_SHA" 2>/dev/null; then
               echo "❌ Failed to fetch base commit $BASE_SHA" >> $GITHUB_STEP_SUMMARY
+              echo "::error::Failed to fetch base commit $BASE_SHA"
               exit 1
             fi
+            echo "✅ Successfully fetched base commit" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           # Verify HEAD_SHA exists
           if ! git rev-parse --verify "$HEAD_SHA^{commit}" >/dev/null 2>&1; then
             echo "❌ Head commit $HEAD_SHA not found" >> $GITHUB_STEP_SUMMARY
+            echo "::error::Head commit $HEAD_SHA not found"
             exit 1
           fi
-          
+
           # Use git diff-tree for robust file change detection
           # --name-only to get just filenames, --no-commit-id to exclude commit info
-          # -r to recurse into subdirectories, -z for null-delimited output (safer parsing)
-          CHANGED_FILES=$(git diff-tree --name-only --no-commit-id -r -z "$BASE_SHA" "$HEAD_SHA" | tr '\0' '\n' | grep -v '^$' || true)
-          
-          # Count total changed files
-          TOTAL_CHANGED=$(echo "$CHANGED_FILES" | grep -c . || echo "0")
-          
-          # Count docs-only files matching ^content/.*\.md$
-          DOCS_ONLY_CHANGED=$(echo "$CHANGED_FILES" | grep -E '^content/.*\.md$' | wc -l || echo "0")
-          
+          # -r to recurse into subdirectories
+          if ! CHANGED_FILES=$(git diff-tree --name-only --no-commit-id -r "$BASE_SHA" "$HEAD_SHA" 2>/dev/null); then
+            echo "❌ Failed to get file changes using git diff-tree" >> $GITHUB_STEP_SUMMARY
+            echo "::error::Failed to run git diff-tree command"
+            exit 1
+          fi
+
+          # Count total changed files (handle empty case)
+          if [ -z "$CHANGED_FILES" ]; then
+            TOTAL_CHANGED=0
+            DOCS_ONLY_CHANGED=0
+          else
+            TOTAL_CHANGED=$(echo "$CHANGED_FILES" | wc -l)
+            # Count docs-only files matching ^content/.*\.md$
+            DOCS_ONLY_CHANGED=$(echo "$CHANGED_FILES" | grep -E '^content/.*\.md$' | wc -l || echo "0")
+          fi
+
           echo "### Summary Statistics" >> $GITHUB_STEP_SUMMARY
           echo "- **Total changed files:** $TOTAL_CHANGED" >> $GITHUB_STEP_SUMMARY
           echo "- **Documentation files changed:** $DOCS_ONLY_CHANGED (matching \`^content/.*\\.md$\`)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ "$TOTAL_CHANGED" -gt 0 ]; then
             echo "### All Changed Files" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
@@ -76,7 +87,7 @@ jobs:
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           if [ "$DOCS_ONLY_CHANGED" -gt 0 ]; then
             echo "### Documentation Files Changed" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
