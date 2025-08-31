@@ -7,10 +7,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   summary:
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with: { fetch-depth: 0 }
       - name: Write step summary
         shell: bash

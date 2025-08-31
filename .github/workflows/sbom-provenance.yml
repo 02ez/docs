@@ -1,0 +1,74 @@
+---
+name: SBOM and Provenance
+
+# **What it does**: Generates software bill of materials and provenance attestation.
+# **Why we have it**: Supply chain security and artifact verification.
+# **Who does it impact**: Docs engineering, security.
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  packages: write
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  sbom-provenance:
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/node-npm-setup
+
+      - name: Build application
+        run: npm run build
+
+      - name: Install Syft for SBOM generation
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Generate SBOM with Syft
+        run: |
+          syft . -o spdx-json --file sbom.spdx.json
+          syft . -o cyclonedx-json --file sbom.cyclonedx.json
+
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@310b0a4a3b0b78ef57ecda988ee04b132db73ef8 # v1.4.4
+        with:
+          subject-path: '.next/**/*'
+
+      - name: Generate SBOM attestation
+        uses: actions/attest-sbom@f19ab44ba2e25c9e6c2e740ba7c45340c17d8677 # v1.4.1
+        with:
+          subject-path: '.next/**/*'
+          sbom-path: 'sbom.spdx.json'
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
+        with:
+          name: sbom-files-${{ github.sha }}
+          path: |
+            sbom.spdx.json
+            sbom.cyclonedx.json
+          retention-days: 7
+
+      - uses: ./.github/actions/slack-alert
+        if: ${{ failure() && github.event_name != 'workflow_dispatch' }}
+        with:
+          slack_channel_id: ${{ secrets.DOCS_ALERTS_SLACK_CHANNEL_ID }}
+          slack_token: ${{ secrets.SLACK_DOCS_BOT_TOKEN }}
