@@ -8,9 +8,10 @@ const workflowsDir = path.join(__dirname, '../../../.github/workflows')
 
 // Security hardening requirements validation
 describe('Security Hardening Validation', () => {
-  const workflowFiles = fs.readdirSync(workflowsDir)
-    .filter(filename => filename.endsWith('.yml') || filename.endsWith('.yaml'))
-    .map(filename => {
+  const workflowFiles = fs
+    .readdirSync(workflowsDir)
+    .filter((filename) => filename.endsWith('.yml') || filename.endsWith('.yaml'))
+    .map((filename) => {
       const fullpath = path.join(workflowsDir, filename)
       const data = yaml.load(fs.readFileSync(fullpath, 'utf8'))
       return { filename, fullpath, data }
@@ -22,12 +23,12 @@ describe('Security Hardening Validation', () => {
       'security-scanning.yml',
       'sbom-provenance.yml',
       'pre-commit.yml',
-      'auto-merge.yml'
+      'auto-merge.yml',
     ]
-    
-    const existingWorkflows = workflowFiles.map(w => w.filename)
-    
-    requiredWorkflows.forEach(required => {
+
+    const existingWorkflows = workflowFiles.map((w) => w.filename)
+
+    requiredWorkflows.forEach((required) => {
       expect(existingWorkflows).toContain(required)
     })
   })
@@ -51,7 +52,7 @@ describe('Security Hardening Validation', () => {
             'moda-allowed-ips.yml',
             'sync-audit-logs.yml',
             'sync-codeql-cli.yml',
-            'sync-openapi.yml'
+            'sync-openapi.yml',
           ]
           if (!allowedWriteWorkflows.includes(filename)) {
             expect(data.permissions.contents).toBe('read')
@@ -72,11 +73,11 @@ describe('Security Hardening Validation', () => {
       'sbom-provenance.yml',
       'pre-commit.yml',
       'auto-merge.yml',
-      'pr-summary.yml'
+      'pr-summary.yml',
     ]
-    
-    criticalWorkflows.forEach(workflowName => {
-      const workflow = workflowFiles.find(w => w.filename === workflowName)
+
+    criticalWorkflows.forEach((workflowName) => {
+      const workflow = workflowFiles.find((w) => w.filename === workflowName)
       if (workflow) {
         expect(workflow.data.concurrency).toBeDefined()
         expect(workflow.data.concurrency.group).toBeDefined()
@@ -86,7 +87,7 @@ describe('Security Hardening Validation', () => {
   })
 
   test('workflows use ubuntu-latest runners only', () => {
-    workflowFiles.forEach(({ filename, data }) => {
+    workflowFiles.forEach(({ data }) => {
       if (data.jobs) {
         Object.values(data.jobs).forEach((job: any) => {
           if (job['runs-on']) {
@@ -101,14 +102,10 @@ describe('Security Hardening Validation', () => {
   })
 
   test('security workflows have proper permissions', () => {
-    const securityWorkflows = [
-      'codeql.yml',
-      'dependency-review.yml',
-      'security-scanning.yml'
-    ]
-    
-    securityWorkflows.forEach(workflowName => {
-      const workflow = workflowFiles.find(w => w.filename === workflowName)
+    const securityWorkflows = ['codeql.yml', 'dependency-review.yml', 'security-scanning.yml']
+
+    securityWorkflows.forEach((workflowName) => {
+      const workflow = workflowFiles.find((w) => w.filename === workflowName)
       if (workflow) {
         expect(workflow.data.permissions).toBeDefined()
         expect(workflow.data.permissions['security-events']).toBe('write')
@@ -118,7 +115,7 @@ describe('Security Hardening Validation', () => {
   })
 
   test('SBOM workflow has correct permissions', () => {
-    const sbomWorkflow = workflowFiles.find(w => w.filename === 'sbom-provenance.yml')
+    const sbomWorkflow = workflowFiles.find((w) => w.filename === 'sbom-provenance.yml')
     if (sbomWorkflow) {
       expect(sbomWorkflow.data.permissions).toBeDefined()
       expect(sbomWorkflow.data.permissions['id-token']).toBe('write')
@@ -128,16 +125,14 @@ describe('Security Hardening Validation', () => {
   })
 
   test('workflows include slack alerts for scheduled runs', () => {
-    const scheduledWorkflows = workflowFiles.filter(({ data }) => 
-      data.on && data.on.schedule
-    )
-    
-    scheduledWorkflows.forEach(({ filename, data }) => {
+    const scheduledWorkflows = workflowFiles.filter(({ data }) => data.on && data.on.schedule)
+
+    scheduledWorkflows.forEach(({ data }) => {
       if (data.jobs) {
         Object.values(data.jobs).forEach((job: any) => {
           if (job.steps) {
-            const hasSlackAlert = job.steps.some((step: any) => 
-              step.uses === './.github/actions/slack-alert'
+            const hasSlackAlert = job.steps.some(
+              (step: any) => step.uses === './.github/actions/slack-alert',
             )
             expect(hasSlackAlert).toBe(true)
           }
@@ -149,16 +144,16 @@ describe('Security Hardening Validation', () => {
   test('artifact retention is set to 7 days', () => {
     const artifactWorkflows = workflowFiles.filter(({ data }) => {
       if (data.jobs) {
-        return Object.values(data.jobs).some((job: any) => 
-          job.steps && job.steps.some((step: any) => 
-            step.uses && step.uses.includes('upload-artifact')
-          )
+        return Object.values(data.jobs).some(
+          (job: any) =>
+            job.steps &&
+            job.steps.some((step: any) => step.uses && step.uses.includes('upload-artifact')),
         )
       }
       return false
     })
-    
-    artifactWorkflows.forEach(({ filename, data }) => {
+
+    artifactWorkflows.forEach(({ data }) => {
       if (data.jobs) {
         Object.values(data.jobs).forEach((job: any) => {
           if (job.steps) {
