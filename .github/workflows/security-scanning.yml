@@ -1,0 +1,75 @@
+---
+name: Security Scanning
+
+# **What it does**: Comprehensive security scanning with Trivy.
+# **Why we have it**: Vulnerability scanning for containers, filesystem, and dependencies.
+# **Who does it impact**: Docs engineering, security.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '20 16 * * *' # Run daily at 16:20 UTC
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  trivy-scan:
+    if: github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b9c928bd1 # v0.24.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+
+      - name: Run Trivy config scan
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b9c928bd1 # v0.24.0
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-config-results.sarif'
+
+      - name: Upload Trivy SARIF results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@eb055d739abdc2e8de2e5f4ba1a8b246daa779aa # v3.26.0
+        with:
+          sarif_file: |
+            trivy-fs-results.sarif
+            trivy-config-results.sarif
+          category: 'trivy'
+
+      - name: Upload scan results as artifacts
+        if: always()
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
+        with:
+          name: trivy-scan-results-${{ github.sha }}
+          path: |
+            trivy-fs-results.sarif
+            trivy-config-results.sarif
+          retention-days: 7
+
+      - uses: ./.github/actions/slack-alert
+        if: ${{ failure() && github.event_name != 'pull_request' }}
+        with:
+          slack_channel_id: ${{ secrets.DOCS_ALERTS_SLACK_CHANNEL_ID }}
+          slack_token: ${{ secrets.SLACK_DOCS_BOT_TOKEN }}

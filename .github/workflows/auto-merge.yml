@@ -1,0 +1,99 @@
+---
+name: Auto-merge
+
+# **What it does**: Automatically merges PRs when all checks pass and code owners approve.
+# **Why we have it**: Streamline the development workflow with safety checks.
+# **Who does it impact**: Docs engineering, contributors.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  check_suite:
+    types: [completed]
+  status: {}
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  auto-merge:
+    if: >
+      github.repository == 'github/docs-internal' || github.repository == 'github/docs'
+      && github.event.pull_request.draft == false
+      && !contains(github.event.pull_request.labels.*.name, 'skip-auto-merge')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Check PR status
+        id: pr-status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Get PR details
+          pr_data=$(gh api /repos/${{ github.repository }}/pulls/$PR_NUMBER)
+
+          # Check if PR is approved by code owners
+          reviews=$(gh api /repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews)
+          approved_by_owners=$(echo "$reviews" | jq -r '.[] | select(.state == "APPROVED") | .user.login' | sort -u)
+
+          # Get required status checks
+          branch_protection=$(gh api /repos/${{ github.repository }}/branches/main/protection 2>/dev/null || echo '{}')
+          required_checks=$(echo "$branch_protection" | jq -r '.required_status_checks.contexts[]?' || echo "")
+
+          # Check if all required checks are passing
+          commit_sha=$(echo "$pr_data" | jq -r '.head.sha')
+          check_runs=$(gh api /repos/${{ github.repository }}/commits/$commit_sha/check-runs)
+
+          all_checks_passed=true
+          if [ -n "$required_checks" ]; then
+            for check in $required_checks; do
+              status=$(echo "$check_runs" | jq -r ".check_runs[] | select(.name == \"$check\") | .conclusion")
+              if [ "$status" != "success" ] && [ "$status" != "skipped" ]; then
+                all_checks_passed=false
+                echo "Check $check is not passing: $status"
+              fi
+            done
+          fi
+
+          echo "all_checks_passed=$all_checks_passed" >> $GITHUB_OUTPUT
+          echo "approved_count=$(echo "$approved_by_owners" | wc -l)" >> $GITHUB_OUTPUT
+
+      - name: Enable auto-merge
+        if: >
+          steps.pr-status.outputs.all_checks_passed == 'true'
+          && steps.pr-status.outputs.approved_count >= 1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          echo "All checks passed and PR is approved. Enabling auto-merge."
+          gh pr merge $PR_NUMBER --squash --auto
+
+      - name: Add comment if auto-merge conditions not met
+        if: >
+          steps.pr-status.outputs.all_checks_passed != 'true'
+          || steps.pr-status.outputs.approved_count < 1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          comment="🤖 Auto-merge conditions not yet met:
+
+          - ✅ All required checks passing: ${{ steps.pr-status.outputs.all_checks_passed }}
+          - ✅ Code owner approval count: ${{ steps.pr-status.outputs.approved_count }} (need ≥1)
+
+          Auto-merge will be enabled automatically when all conditions are met."
+
+          gh pr comment $PR_NUMBER --body "$comment"
