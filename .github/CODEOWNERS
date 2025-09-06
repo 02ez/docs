@@ -15,3 +15,38 @@ src/ghes-releases/lib/enterprise-dates.json @github/docs-content-enterprise
 
 # RAI - CELA
 data/reusables/rai/** @github/legal-product
+
+# Security and DevOps Critical Files - Require security team review
+/.github/workflows/security-scanning.yml @github/security @github/docs-engineering
+/.github/workflows/sbom-provenance.yml @github/security @github/docs-engineering
+/.github/workflows/dependency-review.yml @github/security @github/docs-engineering
+/.github/workflows/codeql.yml @github/security @github/docs-engineering
+/.github/dependabot.yml @github/security @github/docs-engineering
+/.github/dependency-review-config.yml @github/security @github/docs-engineering
+
+# Migration tools and scripts - Require review for data integrity
+/src/migrations/ @github/docs-engineering @github/docs-content
+/src/early-access/scripts/migrate*.ts @github/docs-engineering @github/docs-content
+/data/reusables/enterprise-migration-tool/ @github/docs-engineering @github/docs-content
+
+# Performance monitoring and SLO configurations
+/src/performance/ @github/docs-engineering
+/src/events/lib/schema.ts @github/docs-engineering
+
+# Security hardening tests and configurations
+/src/workflows/tests/security-hardening*.ts @github/security @github/docs-engineering
+
+# Build and deployment configurations
+/Dockerfile @github/docs-engineering @github/security
+/docker-compose.yaml @github/docs-engineering
+/next.config.js @github/docs-engineering
+/package*.json @github/docs-engineering
+
+# TypeScript and build configurations
+/tsconfig.json @github/docs-engineering
+/vitest*.config.ts @github/docs-engineering
+/eslint.config.js @github/docs-engineering
+
+# Security configuration files
+/.secrets.baseline @github/security @github/docs-engineering
+/.pre-commit-config.yaml @github/security @github/docs-engineering

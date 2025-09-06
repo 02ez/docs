@@ -1,5 +1,39 @@
 # Docs changelog
 
+**6 September 2024** - DevOps Security and CI/CD Pipeline Hardening
+
+We've implemented comprehensive DevOps security enhancements to meet enterprise-grade security and reliability standards:
+
+**🔒 Supply Chain Security**
+- Added automated SBOM (Software Bill of Materials) generation with cryptographic attestations
+- Enhanced dependency scanning with security vulnerability detection
+- Implemented signed build provenance for all artifacts
+
+**⚡ Performance Monitoring**
+- Created performance benchmarks for critical paths (content parsing, API responses, search queries)
+- Defined SLO thresholds with automated regression detection (20% degradation alerts)
+- Added memory usage monitoring and bounds checking
+
+**🔄 Migration Safety**
+- Validated all migration operations for idempotency
+- Implemented full rollback automation for migration operations
+- Added comprehensive data integrity checks with checksums
+
+**🛡️ Security Hardening**
+- Enforced minimal permissions principle across all CI/CD workflows
+- Implemented proper concurrency controls to prevent race conditions
+- Enhanced secret scanning and baseline management
+- Updated CODEOWNERS to require security team review for critical components
+
+**🧪 Testing Infrastructure**
+- Fixed TypeScript compilation errors and enforced strict typing
+- Added comprehensive test suites for security, performance, and migration scenarios
+- Created isolated test configurations for different validation types
+
+See: [ADR-001: DevOps Security and CI/CD Pipeline Hardening](./docs/architecture-decisions/ADR-001-devops-security-hardening.md)
+
+<hr>
+
 **28 August 2025**
 
 We've published an article about the new AI-powered issue intake tool, which automates incoming issue analysis and triage for OS maintainers.
