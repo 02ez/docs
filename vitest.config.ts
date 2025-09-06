@@ -13,5 +13,30 @@ export default {
 
     globalSetup: './src/tests/vitest.setup.ts',
     teardownTimeout: 500,
+
+    // Coverage configuration for production readiness
+    coverage: {
+      enabled: false, // Enable when COVERAGE=true environment variable is set
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      reportsDirectory: './coverage',
+      thresholds: {
+        global: {
+          branches: 80,
+          functions: 80,
+          lines: 80,
+          statements: 80,
+        },
+      },
+      exclude: [
+        '**/tests/**',
+        '**/fixtures/**',
+        '**/scripts/**',
+        'src/tests/**',
+        'src/fixtures/**',
+        '**/*.config.{js,ts}',
+        '**/*.d.ts',
+      ],
+    },
   },
 }
