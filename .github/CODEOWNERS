@@ -19,10 +19,18 @@ data/reusables/rai/** @github/legal-product
 # Security and DevOps Critical Files - Require security team review
 /.github/workflows/security-scanning.yml @github/security @github/docs-engineering
 /.github/workflows/sbom-provenance.yml @github/security @github/docs-engineering
+/.github/workflows/supply-chain-security.yml @github/security @github/docs-engineering
+/.github/workflows/build-test-lint.yml @github/security @github/docs-engineering
+/.github/workflows/deploy.yml @github/security @github/docs-engineering
 /.github/workflows/dependency-review.yml @github/security @github/docs-engineering
 /.github/workflows/codeql.yml @github/security @github/docs-engineering
 /.github/dependabot.yml @github/security @github/docs-engineering
 /.github/dependency-review-config.yml @github/security @github/docs-engineering
+
+# DevOps Infrastructure and Security Configuration
+/.github/actions/ @github/security @github/docs-engineering
+/.github/BRANCH_PROTECTION.md @github/security @github/docs-engineering
+/.github/SECURITY_HARDENING.md @github/security @github/docs-engineering
 
 # Migration tools and scripts - Require review for data integrity
 /src/migrations/ @github/docs-engineering @github/docs-content

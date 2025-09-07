@@ -1,0 +1,316 @@
+---
+name: Build Test Lint
+
+# **What it does**: Comprehensive build, test, and lint pipeline with security gates
+# **Why we have it**: Ensures code quality, security, and performance standards before merge
+# **Who does it impact**: All contributors, docs engineering, security teams
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+  security-events: write
+
+# Prevent race conditions and resource conflicts
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  CACHE_VERSION: 'v1'
+  PERFORMANCE_BUDGET_CPU: '2000'
+  PERFORMANCE_BUDGET_MEMORY: '512'
+  COVERAGE_THRESHOLD: '80'
+
+jobs:
+  # Security and compliance pre-checks
+  security-gates:
+    name: Security Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      sleep-gate: ${{ steps.sleep-check.outputs.passed }}
+      security-baseline: ${{ steps.baseline-check.outputs.passed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Sleep Gate Check
+        id: sleep-check
+        run: |
+          # Sleep gate: Block critical actions if developer hasn't slept enough
+          HOURS_SINCE_LAST_COMMIT=$(( ($(date +%s) - $(git log -1 --format="%ct")) / 3600 ))
+          if [ $HOURS_SINCE_LAST_COMMIT -lt 6 ]; then
+            echo "⚠️  Sleep gate: Less than 6 hours since last commit. Consider resting before critical changes."
+            echo "passed=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Sleep gate: Sufficient time since last commit"
+            echo "passed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Security Baseline Check
+        id: baseline-check
+        run: |
+          # Check if security baseline file exists and is valid
+          if [ -f .secrets.baseline ]; then
+            echo "✅ Security baseline file exists"
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Security baseline file missing"
+            echo "passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+  # Code quality and compilation
+  build-and-compile:
+    name: Build and Compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: security-gates
+    if: needs.security-gates.outputs.security-baseline == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci --no-audit --no-fund
+          echo "📦 Dependencies installed"
+
+      - name: TypeScript compilation
+        run: |
+          echo "🔧 Running TypeScript compilation..."
+          npm run tsc 2>&1 | tee typescript-results.log || true
+          
+          # Count compilation errors
+          ERROR_COUNT=$(grep -c "error TS" typescript-results.log || echo "0")
+          echo "TypeScript errors found: $ERROR_COUNT"
+          
+          if [ "$ERROR_COUNT" -gt "0" ]; then
+            echo "❌ TypeScript compilation failed with $ERROR_COUNT errors"
+            echo "Showing first 20 errors:"
+            head -20 typescript-results.log
+            exit 1
+          else
+            echo "✅ TypeScript compilation successful"
+          fi
+
+      - name: Build application
+        run: |
+          echo "🏗️  Building application..."
+          npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
+        with:
+          name: build-artifacts-${{ github.sha }}
+          path: |
+            .next/
+            out/
+          retention-days: 7
+
+  # Linting and code style
+  lint-and-style:
+    name: Lint and Style
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: security-gates
+    if: needs.security-gates.outputs.security-baseline == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run ESLint
+        run: |
+          echo "🔍 Running ESLint..."
+          npm run lint -- --format=compact --max-warnings=0
+
+      - name: Run Prettier
+        run: |
+          echo "💅 Checking code formatting..."
+          npm run prettier -- --check
+
+      - name: Content linting
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "📝 Running content linting..."
+          npm run lint-content
+
+  # Comprehensive testing
+  test-suite:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [security-gates, build-and-compile]
+    if: needs.security-gates.outputs.security-baseline == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        test-type: ['unit', 'integration', 'security', 'performance']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Start Elasticsearch (for search tests)
+        if: matrix.test-type == 'integration'
+        run: |
+          docker run -d --name elasticsearch \
+            -e "discovery.type=single-node" \
+            -e "xpack.security.enabled=false" \
+            -p 9200:9200 \
+            elasticsearch:8.15.0
+          
+          # Wait for Elasticsearch to be ready
+          timeout 60 bash -c 'until curl -s http://localhost:9200/_cluster/health; do sleep 1; done'
+
+      - name: Run tests
+        run: |
+          case "${{ matrix.test-type }}" in
+            "unit")
+              echo "🧪 Running unit tests..."
+              npm run test -- --run --coverage --reporter=junit --outputFile=unit-test-results.xml
+              ;;
+            "integration")
+              echo "🔗 Running integration tests..."
+              ELASTICSEARCH_URL=http://localhost:9200/ npm run test -- --run src/search/tests/
+              ;;
+            "security")
+              echo "🔒 Running security hardening tests..."
+              npm run test -- --run src/workflows/tests/security-hardening*.ts
+              ;;
+            "performance")
+              echo "⚡ Running performance tests..."
+              npm run test -- --run --config vitest.performance.config.ts
+              ;;
+          esac
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
+        with:
+          name: test-results-${{ matrix.test-type }}-${{ github.sha }}
+          path: |
+            coverage/
+            *-test-results.xml
+          retention-days: 7
+
+  # Performance benchmarking
+  performance-budget:
+    name: Performance Budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [build-and-compile]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: build-artifacts-${{ github.sha }}
+
+      - name: Performance budget check
+        run: |
+          echo "📊 Checking performance budget..."
+          
+          # Check bundle size
+          BUNDLE_SIZE=$(du -s .next | cut -f1)
+          echo "Bundle size: ${BUNDLE_SIZE}KB"
+          
+          if [ "$BUNDLE_SIZE" -gt "${{ env.PERFORMANCE_BUDGET_CPU }}" ]; then
+            echo "❌ Bundle size exceeds performance budget"
+            exit 1
+          fi
+          
+          echo "✅ Performance budget check passed"
+
+  # Quality gates
+  quality-gates:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    needs: [lint-and-style, test-suite, performance-budget]
+    if: always()
+    steps:
+      - name: Check quality gates
+        run: |
+          echo "🎯 Evaluating quality gates..."
+          
+          # Check if all required jobs passed
+          LINT_STATUS="${{ needs.lint-and-style.result }}"
+          TEST_STATUS="${{ needs.test-suite.result }}"
+          PERF_STATUS="${{ needs.performance-budget.result }}"
+          
+          echo "Lint status: $LINT_STATUS"
+          echo "Test status: $TEST_STATUS"
+          echo "Performance status: $PERF_STATUS"
+          
+          if [[ "$LINT_STATUS" == "success" && "$TEST_STATUS" == "success" && "$PERF_STATUS" == "success" ]]; then
+            echo "✅ All quality gates passed"
+          else
+            echo "❌ Quality gates failed"
+            exit 1
+          fi
+
+  # Final validation
+  merge-readiness:
+    name: Merge Readiness
+    runs-on: ubuntu-latest
+    needs: [security-gates, quality-gates]
+    if: always()
+    steps:
+      - name: Sleep gate enforcement
+        if: needs.security-gates.outputs.sleep-gate == 'false'
+        run: |
+          echo "🚫 Sleep gate failed - blocking merge for critical changes"
+          echo "Developer should rest before making critical changes"
+          exit 1
+
+      - name: Final merge validation
+        run: |
+          echo "🚀 All systems ready for merge"
+          echo "Security gates: ${{ needs.security-gates.result }}"
+          echo "Quality gates: ${{ needs.quality-gates.result }}"
+          
+          if [[ "${{ needs.security-gates.result }}" == "success" && "${{ needs.quality-gates.result }}" == "success" ]]; then
+            echo "✅ Pull request is ready for merge"
+          else
+            echo "❌ Pull request is not ready for merge"
+            exit 1
+          fi
